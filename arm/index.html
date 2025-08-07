@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robot Arm Simulator</title>
+    <style>
+        /* ADDED: Font import */
+        @font-face {
+            font-family: 'VCR OSD Mono';
+            src: url('https://fonts.cdnfonts.com/s/24847/VCR_OSD_MONO_1.001.woff') format('woff');
+        }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0f0f23;
+            /* MODIFIED: Default font changed */
+            font-family: 'VCR OSD Mono', monospace;
+        }
+        canvas {
+            display: block;
+        }
+        #sidebar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            color: white;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            width: 350px;
+            max-height: calc(100vh - 20px);
+            overflow-y: auto;
+            transition: transform 0.3s ease-in-out;
+            z-index: 10;
+        }
+        #sidebar.closed {
+            transform: translateX(-110%);
+        }
+        #toggle-button {
+            position: absolute;
+            top: 10px;
+            left: 10px; /* Initially positioned with the panel */
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            z-index: 11;
+            transition: transform 0.3s ease-in-out;
+            /* MODIFIED: Font applied to button */
+            font-family: 'VCR OSD Mono', monospace;
+        }
+        #toggle-button.closed {
+            transform: translateX(0);
+        }
+
+        h1 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.5rem;
+        }
+        p {
+            margin: 0 0 1rem 0;
+            color: #9ca3af;
+        }
+        .control-section {
+            margin-bottom: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            padding-top: 1rem;
+        }
+        .joint-control, .label-toggle {
+            margin-bottom: 0.5rem;
+        }
+        label {
+            display: inline-block;
+            margin-bottom: 0.25rem;
+            font-size: 0.9rem;
+            vertical-align: middle;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        input[type="checkbox"] {
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        .joint-label {
+            color: #fff;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            white-space: nowrap;
+            text-transform: capitalize;
+            /* MODIFIED: Font applied to 3D labels */
+            font-family: 'VCR OSD Mono', monospace;
+        }
+    </style>
+</head>
+<body>
+    <button id="toggle-button">Toggle Panel</button>
+    <div id="sidebar">
+        <h1>Robot Arm Simulator</h1>
+        <p>This is a standalone test environment. Use the sliders below to control the robot arm joints manually.</p>
+        <div class="control-section">
+            <h3>Joint Controls</h3>
+            <div id="sliders-container"></div>
+        </div>
+        <div class="control-section">
+            <h3>Label Visibility</h3>
+            <div id="toggles-container"></div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // --- Global State & Config ---
+        // MODIFIED: Swapped wrist and gripper for UI order
+        const jointsState = [
+            { name: 'base_rotation', angle: 0, min: -180, max: 180 },
+            { name: 'shoulder', angle: -45, min: -90, max: 90 },
+            { name: 'elbow', angle: 90, min: 0, max: 156 },
+            { name: 'wrist_2', angle: 0, min: -138, max: 138 },
+            { name: 'gripper', angle: 0.03, min: 0.005, max: 0.04 }
+        ];
+        const jointLabels = {}; // Object to store label objects
+
+        // --- 3D Scene Setup ---
+        const scene = new THREE.Scene();
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1;
+        document.body.appendChild(renderer.domElement);
+        
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.body.appendChild(labelRenderer.domElement);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(5, 3, 5);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1, 0);
+        controls.enableDamping = true;
+
+        // --- Lighting & Environment ---
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(10, 10, 5);
+        scene.add(dirLight);
+        
+        new RGBELoader()
+            .setPath( 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/textures/equirectangular/' )
+            .load( 'venice_sunset_1k.hdr', function ( texture ) {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                scene.background = texture;
+                scene.environment = texture;
+            });
+
+        const grid = new THREE.GridHelper(20, 20, 0x444444, 0x888888);
+        scene.add(grid);
+
+        // --- Robot Model Creation ---
+        const robot = new THREE.Group();
+        scene.add(robot);
+        const robotParts = {};
+
+        function createLimb(geometry, color, position, parent) {
+            const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, metalness: 0.7, roughness: 0.5 }));
+            mesh.position.fromArray(position);
+            parent.add(mesh);
+            return mesh;
+        }
+
+        function createLabel(text, parent, yOffset = 0.2) {
+            const div = document.createElement('div');
+            div.className = 'joint-label';
+            div.textContent = text;
+            const label = new CSS2DObject(div);
+            label.position.set(0, yOffset, 0);
+            parent.add(label);
+            jointLabels[text.toLowerCase()] = label; // Store the label
+            return label;
+        }
+
+        robotParts.base_rotation = new THREE.Group();
+        robot.add(robotParts.base_rotation);
+        createLimb(new THREE.CylinderGeometry(0.3, 0.3, 0.2, 32), '#6B7280', [0, 0.1, 0], robotParts.base_rotation);
+        createLabel('Base', robotParts.base_rotation, 0.3);
+        
+        robotParts.shoulder = new THREE.Group();
+        robotParts.shoulder.position.set(0, 0.3, 0);
+        robotParts.base_rotation.add(robotParts.shoulder);
+        createLimb(new THREE.BoxGeometry(0.2, 0.8, 0.2), '#9CA3AF', [0, 0.4, 0], robotParts.shoulder);
+        createLimb(new THREE.BoxGeometry(0.15, 1.2, 0.15), '#D1D5DB', [0, 0.8, 0], robotParts.shoulder);
+        createLabel('Shoulder', robotParts.shoulder, 0.5);
+
+        robotParts.elbow = new THREE.Group();
+        robotParts.elbow.position.set(0, 1.4, 0);
+        robotParts.shoulder.add(robotParts.elbow);
+        createLimb(new THREE.SphereGeometry(0.12, 16, 16), '#9CA3AF', [0, 0.1, 0], robotParts.elbow);
+        createLimb(new THREE.BoxGeometry(0.12, 1.2, 0.12), '#D1D5DB', [0, 0.6, 0], robotParts.elbow);
+        createLabel('Elbow', robotParts.elbow, 0.8);
+        
+        robotParts.wrist_2 = new THREE.Group();
+        robotParts.wrist_2.position.set(0, 1.2, 0);
+        robotParts.elbow.add(robotParts.wrist_2);
+        createLimb(new THREE.SphereGeometry(0.1, 16, 16), '#9CA3AF', [0, 0.1, 0], robotParts.wrist_2);
+        createLabel('Wrist', robotParts.wrist_2, 0.1);
+
+        const gripperGroup = new THREE.Group();
+        gripperGroup.position.set(0, 0.2, 0);
+        gripperGroup.rotation.y = THREE.MathUtils.degToRad(90);
+        robotParts.wrist_2.add(gripperGroup);
+        createLabel('Gripper', gripperGroup, 0.05);
+
+        const gripperBase = createLimb(new THREE.BoxGeometry(0.08, 0.08, 0.08), '#6B7280', [0, 0, 0], gripperGroup);
+        const fingerGeometry = new THREE.BoxGeometry(0.02, 0.15, 0.05);
+        robotParts.finger1 = createLimb(fingerGeometry, '#D1D5DB', [0, 0.075, 0], gripperGroup);
+        robotParts.finger2 = createLimb(fingerGeometry, '#D1D5DB', [0, 0.075, 0], gripperGroup);
+
+        // --- UI Panel Creation ---
+        const slidersContainer = document.getElementById('sliders-container');
+        const togglesContainer = document.getElementById('toggles-container');
+
+        jointsState.forEach(joint => {
+            const controlDiv = document.createElement('div');
+            controlDiv.className = 'joint-control';
+            const sliderLabel = document.createElement('label');
+            sliderLabel.id = `label-${joint.name}`;
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = joint.min;
+            slider.max = joint.max;
+            slider.value = joint.angle;
+            slider.id = `slider-${joint.name}`;
+
+            if (joint.name === 'gripper') {
+                slider.step = 0.001;
+                sliderLabel.textContent = `${joint.name}: ${joint.angle.toFixed(3)}`;
+            } else {
+                sliderLabel.textContent = `${joint.name.replace(/_/g, ' ')}: ${joint.angle.toFixed(1)}°`;
+            }
+
+            slider.oninput = () => {
+                const newValue = parseFloat(slider.value);
+                joint.angle = newValue; 
+
+                if (joint.name === 'gripper') {
+                    sliderLabel.textContent = `${joint.name}: ${newValue.toFixed(3)}`;
+                } else {
+                    sliderLabel.textContent = `${joint.name.replace(/_/g, ' ')}: ${newValue.toFixed(1)}°`;
+                }
+            };
+
+            controlDiv.appendChild(sliderLabel);
+            controlDiv.appendChild(slider);
+            slidersContainer.appendChild(controlDiv);
+        });
+
+        // Create label toggles
+        Object.keys(jointLabels).forEach(key => {
+            const toggleDiv = document.createElement('div');
+            toggleDiv.className = 'label-toggle';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = true;
+            checkbox.id = `toggle-${key}`;
+            checkbox.onchange = () => { jointLabels[key].visible = checkbox.checked; };
+            const checkLabel = document.createElement('label');
+            checkLabel.textContent = key;
+            checkLabel.htmlFor = `toggle-${key}`;
+            toggleDiv.appendChild(checkbox);
+            toggleDiv.appendChild(checkLabel);
+            togglesContainer.appendChild(toggleDiv);
+        });
+
+        // --- Sidebar Toggle Logic ---
+        const sidebar = document.getElementById('sidebar');
+        const toggleButton = document.getElementById('toggle-button');
+        toggleButton.onclick = () => {
+            sidebar.classList.toggle('closed');
+            const isClosed = sidebar.classList.contains('closed');
+            toggleButton.style.transform = isClosed ? 'translateX(0px)' : `translateX(${sidebar.offsetWidth + 10}px)`;
+        };
+
+
+        // --- Main Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const baseState = jointsState.find(j => j.name === 'base_rotation');
+            if (baseState) robotParts.base_rotation.rotation.y = THREE.MathUtils.degToRad(baseState.angle);
+
+            const shoulderState = jointsState.find(j => j.name === 'shoulder');
+            if (shoulderState) robotParts.shoulder.rotation.z = THREE.MathUtils.degToRad(shoulderState.angle);
+
+            const elbowState = jointsState.find(j => j.name === 'elbow');
+            if (elbowState) robotParts.elbow.rotation.z = THREE.MathUtils.degToRad(elbowState.angle);
+
+            const wristState = jointsState.find(j => j.name === 'wrist_2');
+            if (wristState) robotParts.wrist_2.rotation.z = THREE.MathUtils.degToRad(wristState.angle);
+            
+            const gripperState = jointsState.find(j => j.name === 'gripper');
+            if (gripperState) {
+                const finger_dist = (gripperState.angle - gripperState.min) / (gripperState.max - gripperState.min) * 0.06 + 0.02; 
+                robotParts.finger1.position.x = -finger_dist;
+                robotParts.finger2.position.x = finger_dist;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+
+        // --- Handle Window Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
