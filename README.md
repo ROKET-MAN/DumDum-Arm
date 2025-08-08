@@ -1,6 +1,5 @@
 # DumDum - 5-Axis Robot Arm Controller
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+This project is distributed under the Apache 2.0 License. See the LICENSE file for more information.
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
 DumDum is a real-time, vision-based controller for a 5-axis robot arm. It uses a combination of MediaPipe Pose (BlazePose) and MediaPipe Hands to translate your arm and hand movements into (near) precise robotic commands. Then it's all visualized through a live, interactive web interface.
