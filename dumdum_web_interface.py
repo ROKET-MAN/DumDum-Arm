@@ -10,13 +10,15 @@ from flask_sock import Sock
 #The arm_translator.py file MUST BE IN THE SAME FOLDER AS THIS OTHERWISE YOU NEED TO ADD SOMETHING FOR DIRECTORY. 
 # ALL FILES WERE MERGED TO ONE FOR EASE OF USE & SO I CAN COPY AND PASTE THIS TO THE GITHUB!!! 
 from arm_translator import ArmPoseTranslator
+#CONFIG
+# In dumdum_web_interface.py
 
 #CONFIG
 ARM_SERVO_MAP = {
     'base':     {'id': 1, 'angle_range': [-0.3, 0.3],   'pulse_range': [500, 2500], 'sim_angle_range': [-180, 180]},
     'shoulder': {'id': 2, 'angle_range': [45, 135],    'pulse_range': [1000, 2000], 'sim_angle_range': [-90, 90]},
     'elbow':    {'id': 3, 'angle_range': [30, 160],    'pulse_range': [700, 2000], 'sim_angle_range': [0, 156]},
-    'wrist':    {'id': 4, 'angle_range': [0.8, 1.2],   'pulse_range': [1000, 2000], 'sim_angle_range': [-138, 138]},
+    'wrist':    {'id': 4, 'angle_range': [20, 100],    'pulse_range': [1000, 2000], 'sim_angle_range': [-138, 138]},
     'gripper':  {'id': 5, 'angle_range': [0.02, 0.15], 'pulse_range': [600, 1500], 'sim_angle_range': [0.005, 0.04]}
 }
 
@@ -43,8 +45,6 @@ class LogQueueHandler:
     def flush(self):
         pass #
 
-
-
 # BACKGROUND CAMERA THREAD
 def camera_and_ai_thread():
     """Continuously captures frames and runs pose estimation."""
@@ -62,21 +62,23 @@ def camera_and_ai_thread():
         if not success:
             time.sleep(0.01) 
             continue
-           
+        
+        #ADD THIS LINE TO FLIP THE IMAGE HORIZONTALLY
+        frame = cv2.flip(frame, 1) 
+   
         annotated_frame, servo_commands = translator.process_frame(frame)
        
         with shared_data['lock']:
             shared_data['latest_frame'] = annotated_frame
             if servo_commands:
                 shared_data['latest_commands'] = servo_commands
-        # processing time will naturally limit the loop speed SO YOUR ORIN DOESNT CRASH!! it happens.
+        #processing time will naturally limit the loop speed SO YOUR ORIN DOESNT CRASH!! it happens.
 
 #FLASK ROUTES
 @app.route('/')
 def index():
     """Serves the main HTML page with the integrated UI."""
     return render_template_string(HTML_PAGE)
-
 
 
 def video_stream_generator():
@@ -90,7 +92,7 @@ def video_stream_generator():
             continue
        
         #Lowered JPEG quality to 75 to reduces latency, edit to your liking.
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
         ret, buffer = cv2.imencode('.jpg', frame, encode_param)
        
         if ret:
@@ -562,8 +564,6 @@ HTML_PAGE = """
             }
 
 
-
-
             const width = simContainer.clientWidth;
             const height = simContainer.clientHeight;
             if (canvas.width !== width || canvas.height !== height) {
@@ -572,7 +572,6 @@ HTML_PAGE = """
                 camera.aspect = width / height;
                 camera.updateProjectionMatrix();
             }
-
 
 
             controls.update();
@@ -596,5 +595,6 @@ if __name__ == '__main__':
     main_thread.start()
     print(f"Starting Flask server. Open your browser to http://127.0.0.1:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
+
 
     #600!!!!!!! :D
